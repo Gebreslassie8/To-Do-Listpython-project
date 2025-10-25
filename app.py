@@ -12,11 +12,16 @@ load_dotenv()
 app = Flask(__name__)
 CORS(app)
 
-# Configuration - Use simpler keys for development
-app.config['SECRET_KEY'] = 'dev-secret-key-12345'
-app.config['JWT_SECRET_KEY'] = 'jwt-dev-secret-12345'
+# Configuration
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-12345')
+app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'jwt-dev-secret-12345')
 app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(days=1)
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+
+# Database configuration for production
+database_url = os.getenv('DATABASE_URL', 'sqlite:///app.db')
+if database_url.startswith('postgres://'):
+    database_url = database_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = database_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Initialize extensions
@@ -70,7 +75,11 @@ def index():
 
 @app.route('/api/health')
 def health_check():
-    return jsonify({'status': 'healthy', 'message': 'Server is running'})
+    return jsonify({
+        'status': 'healthy', 
+        'message': 'Server is running',
+        'environment': os.getenv('FLASK_ENV', 'development')
+    })
 
 # Authentication Routes
 @app.route('/api/register', methods=['POST'])
@@ -111,6 +120,7 @@ def register():
         }), 201
         
     except Exception as e:
+        db.session.rollback()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/login', methods=['POST'])
@@ -148,7 +158,6 @@ def login():
 def get_todos():
     try:
         user_id = get_jwt_identity()
-        print(f"🔍 Fetching todos for user ID: {user_id} (type: {type(user_id)})")
         
         # Convert to integer if needed
         try:
@@ -173,7 +182,6 @@ def get_todos():
 def create_todo():
     try:
         user_id = get_jwt_identity()
-        print(f"📝 Creating todo for user ID: {user_id}")
         
         data = request.get_json()
         
@@ -221,6 +229,7 @@ def create_todo():
         }), 201
         
     except Exception as e:
+        db.session.rollback()
         print(f"❌ Error in create_todo: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
@@ -271,6 +280,7 @@ def update_todo(todo_id):
         })
         
     except Exception as e:
+        db.session.rollback()
         print(f"❌ Error in update_todo: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
@@ -297,6 +307,7 @@ def delete_todo(todo_id):
         return jsonify({'message': 'Todo deleted successfully'})
         
     except Exception as e:
+        db.session.rollback()
         print(f"❌ Error in delete_todo: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
@@ -329,7 +340,7 @@ def get_statistics():
             'total': total,
             'completed': completed,
             'pending': pending,
-            'completion_rate': (completed / total * 100) if total > 0 else 0,
+            'completion_rate': round((completed / total * 100), 2) if total > 0 else 0,
             'category_stats': category_stats,
             'priority_stats': priority_stats,
             'category_colors': CATEGORY_COLORS,
@@ -344,12 +355,16 @@ def get_statistics():
 with app.app_context():
     db.create_all()
     print("✅ Database initialized successfully!")
-    print("🔑 JWT Secret Key:", app.config['JWT_SECRET_KEY'])
+    print("🌐 Environment:", os.getenv('FLASK_ENV', 'development'))
+    print("🗄️ Database URL:", os.getenv('DATABASE_URL', 'sqlite:///app.db'))
 
 if __name__ == '__main__':
+    debug_mode = os.getenv('FLASK_ENV') == 'development'
+    port = int(os.getenv('PORT', 5000))
+    
     print("🚀 Starting Professional Todo App...")
-    print("📁 Database: instance/app.db")
-    print("🌐 Web Interface: http://localhost:5000")
-    print("🔧 Debug Mode: ON")
+    print(f"🌐 Web Interface: http://0.0.0.0:{port}")
+    print(f"🔧 Debug Mode: {debug_mode}")
     print("Press Ctrl+C to stop the server")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    
+    app.run(debug=debug_mode, host='0.0.0.0', port=port)
